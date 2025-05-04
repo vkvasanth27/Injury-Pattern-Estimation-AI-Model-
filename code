@@ -1,0 +1,133 @@
+import tensorflow as tf
+from keras import layers, models
+from keras.preprocessing.image import ImageDataGenerator
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from imblearn.over_sampling import SMOTE
+from keras.utils import to_categorical
+import numpy as np
+import os
+from collections import Counter
+import matplotlib.pyplot as plt
+
+# Set parameters
+img_height, img_width = 224, 224
+batch_size = 32
+num_classes = 3
+learning_rate = 1e-4 # Increased for better learning
+epochs = 80
+
+# Function to load images & labels
+def load_data(data_dir):
+    images, labels = [], []
+    for label in os.listdir(data_dir):
+        label_path = os.path.join(data_dir, label)
+        if os.path.isdir(label_path):
+            for img_file in os.listdir(label_path):
+                img_path = os.path.join(label_path, img_file)
+                try:
+                    img = tf.keras.preprocessing.image.load_img(img_path, target_size=(img_height, img_width))
+                    img_array = tf.keras.preprocessing.image.img_to_array(img)
+                    images.append(img_array)
+                    labels.append(label)
+                except Exception as e:
+                    print(f"Error loading image {img_path}: {e}")
+    return np.array(images), np.array(labels)
+
+# Load dataset
+data_dir = "C:\\Users\\Vasanth\\Desktop\\DATA _SET"
+X, y = load_data(data_dir)
+
+# Encode labels
+label_encoder = LabelEncoder()
+y_encoded = label_encoder.fit_transform(y)
+y_categorical = to_categorical(y_encoded, num_classes=num_classes)  # Convert to categorical
+
+# Normalize images
+X = X / 255.0
+
+# Handle class imbalance using SMOTE
+smote = SMOTE(random_state=42)
+X_resampled, y_resampled = smote.fit_resample(X.reshape(X.shape[0], -1), y_encoded)
+X_resampled = X_resampled.reshape(-1, img_height, img_width, 3)  # Reshape back to image format
+y_resampled = to_categorical(y_resampled, num_classes=num_classes)
+
+# Check class balance after resampling
+print("Class distribution after SMOTE:", Counter(np.argmax(y_resampled, axis=1)))
+
+# Split dataset
+X_train, X_val, y_train, y_val = train_test_split(X_resampled, y_resampled, test_size=0.2, random_state=42)
+
+# Data augmentation (moderate)
+datagen = ImageDataGenerator(
+     rotation_range=20,
+    width_shift_range=0.2,
+    height_shift_range=0.2,
+    horizontal_flip=True,
+)
+
+# Use MobileNetV2 (lighter model for small datasets)
+base_model = tf.keras.applications.MobileNetV2(
+    weights='imagenet', include_top=False, input_shape=(img_height, img_width, 3)
+)
+
+# Freeze initial layers
+for layer in base_model.layers[:-20]:
+    layer.trainable = False
+
+# Build model
+model = models.Sequential([
+    base_model,
+    layers.GlobalAveragePooling2D(),
+    layers.Dense(128, activation='relu'),
+    layers.Dropout(0.4),
+    layers.Dense(num_classes, activation='softmax')
+])
+
+model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+              loss='categorical_crossentropy',
+              metrics=['accuracy'])
+
+# Train the model
+history = model.fit(
+    datagen.flow(X_train, y_train, batch_size=batch_size),
+    validation_data=(X_val, y_val),
+    epochs=epochs,
+    callbacks=[tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=6, restore_best_weights=True)]
+)
+
+# Save model
+model.save ("optimized_model final01.h5")
+print("Model saved as 'optimized_model.h5'")
+
+# Plot training metrics
+plt.figure(figsize=(10, 6))
+plt.plot(history.history['accuracy'], label='Train Accuracy', color='blue')
+plt.plot(history.history['val_accuracy'], label='Validation Accuracy', color='orange')
+plt.plot(history.history['loss'], label='Train Loss', color='green')
+plt.plot(history.history['val_loss'], label='Validation Loss', color='red')
+plt.title('Training and Validation Metrics')
+plt.xlabel('Epochs')
+plt.ylabel('Accuracy/Loss')
+plt.legend()
+plt.show()
+
+# Test predictions on multiple images
+test_images = [
+    "C:\\Users\\Vasanth\\Desktop\\DATA _SET\\PENETRATION\\image 18.jpeg",
+    "C:\\Users\\Vasanth\\Desktop\\DATA _SET\\BLUNT\\image 3.jpeg",
+    "C:\\Users\\Vasanth\\Desktop\\DATA _SET\\UNKNOWN\\image 9.jpeg"
+    
+]
+
+for img_path in test_images:
+    img = tf.keras.preprocessing.image.load_img(img_path, target_size=(img_height, img_width))
+    img_array = tf.keras.preprocessing.image.img_to_array(img) / 255.0
+    img_array = np.expand_dims(img_array, axis=0)
+    prediction = model.predict(img_array)
+    predicted_class = label_encoder.inverse_transform([np.argmax(prediction)])
+    print(f"Predicted class for {img_path}: {predicted_class}, Confidence: {prediction}")
+
+# Check final class distribution
+flattened_y = np.ravel(y_resampled)
+print("Final Class Distribution:", Counter(flattened_y))
