@@ -1,0 +1,67 @@
+import numpy as np
+import json
+import tensorflow as tf
+import streamlit as st
+from streamlit_lottie import st_lottie
+from keras.models import load_model
+from PIL import Image
+
+# Load trained model
+model = tf.keras.models.load_model("final01.h5")
+
+# Confidence threshold (adjust as needed)
+CONFIDENCE_THRESHOLD = 0.80
+
+def predict_image(image):
+    """Predicts the class of an input image."""
+    img = image.resize((224, 224))  # Resize to model input shape
+    img_array = np.array(img) / 255.0  # Normalize
+    
+    # Ensure the image has 3 color channels (RGB)
+    if len(img_array.shape) == 2:  # If grayscale, convert to RGB
+        img_array = np.stack((img_array,) * 3, axis=-1)
+    elif img_array.shape[-1] == 4:  # If RGBA, convert to RGB
+        img_array = img_array[..., :3]
+    
+    # Ensure batch dimension
+    img_array = np.expand_dims(img_array, axis=0)  # Add batch dimension
+    
+    predictions = model.predict(img_array)
+    confidence = np.max(predictions)
+    predicted_class = np.argmax(predictions)
+    
+    class_labels = ["Blunt Injury", "Penetration Injury", "Image can be miscellaneous,Please verify"]
+    
+    # Apply confidence threshold
+    if confidence < CONFIDENCE_THRESHOLD:
+        return "Predicted: Image can be miscellaneous,Please verify.", confidence
+    else:
+        return f"Predicted: {class_labels[predicted_class]}", confidence
+
+def load_lottiefile(filepath: str):
+    """Load a Lottie animation from a file."""
+    with open(filepath, "r") as f:
+        return json.load(f)
+    
+# Load the Lottie animation (ensure correct path)
+lottie_xray = load_lottiefile("C:\\Users\\Vasanth\\Desktop\\xary.json")
+
+# Streamlit UI
+# Center alignment using Streamlit columns
+col1, col2, col3 = st.columns([1, 2, 1])  # Adjust the middle column width
+with col2:
+    st_lottie(lottie_xray, height=300, width=300, key="centered")
+
+st.title("Radiographical Image Injury Classifier")
+st.write("Upload an image, and I'll tell you what injury it is!")
+
+uploaded_file = st.file_uploader("Upload an X-ray image", type=["jpg", "png", "jpeg"])
+
+if uploaded_file is not None:
+    image = Image.open(uploaded_file).convert("RGB")  # Ensure image is in RGB format
+    st.image(image, caption="Uploaded Image", use_column_width=True)
+    result, conf = predict_image(image)
+    st.title(f"{result}")
+
+st.write("AI Model can make mistakes. Check important info.")
+
